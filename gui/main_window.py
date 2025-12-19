@@ -1742,7 +1742,6 @@ class MainWindow(QMainWindow):
         archive_path = self.config.get_archive_path() or os.path.dirname(path)
         
         self.log(f"📦 开始打包 {project_name}...")
-        self.package_btn.setEnabled(False)
         
         # Create and start worker
         self.package_worker = PackageWorker(path, project_name, archive_path, version, project_type)
@@ -1752,7 +1751,6 @@ class MainWindow(QMainWindow):
     
     def on_package_finished(self, success: bool, result: str):
         """Handle package completion."""
-        self.package_btn.setEnabled(True)
         if success:
             self.last_zip_path = result
     
