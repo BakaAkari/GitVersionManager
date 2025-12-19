@@ -22,10 +22,14 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller build output (keep .spec for reproducible builds)
+# PyInstaller build output
 build/
 dist/
 *.manifest
+*.spec
+
+# Local scripts
+*.bat
 
 # IDE
 .idea/
