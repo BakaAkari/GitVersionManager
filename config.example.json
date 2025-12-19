@@ -1,0 +1,30 @@
+{
+    "archive_path": "D:/Archives",
+    "tokens": {
+        "github": "ghp_your_github_token_here",
+        "gitee": "your_gitee_token_here",
+        "gitea": {
+            "url": "https://gitea.example.com",
+            "token": "your_gitea_token_here"
+        }
+    },
+    "projects": [
+        {
+            "path": "D:/Code/MyAddon",
+            "type": "blender_addon",
+            "publish_to": [
+                "github",
+                "gitee"
+            ],
+            "github_repo": "username/repo",
+            "gitee_repo": "username/repo",
+            "gitea_repo": ""
+        }
+    ],
+    "settings": {
+        "theme": "light",
+        "language": "zh_CN",
+        "auto_fetch": true,
+        "confirm_before_publish": true
+    }
+}
