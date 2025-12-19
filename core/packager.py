@@ -82,6 +82,54 @@ class Packager:
         
         return output_path
     
+    def create_dist_zip(self, version: str, include_version_in_name: bool = True) -> str:
+        """
+        Create a ZIP file of the dist/ folder only (for compiled executables).
+        Returns the path to the created ZIP file.
+        """
+        dist_path = os.path.join(self.project_path, "dist")
+        
+        # Check if dist folder exists
+        if not os.path.exists(dist_path):
+            raise FileNotFoundError(f"dist/ folder not found in {self.project_path}")
+        
+        # Find the main folder inside dist (e.g., dist/GitVersionManager/)
+        dist_contents = os.listdir(dist_path)
+        main_folder = None
+        for item in dist_contents:
+            item_path = os.path.join(dist_path, item)
+            if os.path.isdir(item_path):
+                main_folder = item_path
+                break
+        
+        # If no subfolder, use dist itself
+        source_path = main_folder if main_folder else dist_path
+        
+        if include_version_in_name:
+            zip_filename = f"{self.project_name}_v{version}.zip"
+        else:
+            zip_filename = f"{self.project_name}.zip"
+        
+        # Ensure archive directory exists
+        os.makedirs(self.archive_path, exist_ok=True)
+        
+        output_path = os.path.join(self.archive_path, zip_filename)
+        
+        # Remove existing file if present
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(source_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Create archive path with project name as root
+                    rel_path = os.path.relpath(file_path, source_path)
+                    arcname = os.path.join(self.project_name, rel_path)
+                    zipf.write(file_path, arcname)
+        
+        return output_path
+    
     def get_archive_history(self) -> List[dict]:
         """Get list of archived versions."""
         history = []

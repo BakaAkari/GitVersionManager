@@ -140,15 +140,72 @@ class CustomParser(VersionParser):
         return self.pattern.sub(replace_func, content)
 
 
+class PythonAppParser(VersionParser):
+    """
+    Parser for Python compiled exe applications.
+    
+    Version file: version.py
+    Format:
+        __version__ = "1.0.0"
+        VERSION = (1, 0, 0)  # optional tuple format
+    """
+    
+    # Match __version__ = "x.y.z" or __version__ = 'x.y.z'
+    VERSION_PATTERN = re.compile(r'__version__\s*=\s*["\'](\d+)\.(\d+)\.(\d+)["\']')
+    # Match VERSION = (x, y, z)
+    VERSION_TUPLE_PATTERN = re.compile(r'VERSION\s*=\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)')
+    
+    def get_version_file(self) -> str:
+        return "version.py"
+    
+    def get_version(self, content: str) -> Optional[Tuple[int, int, int]]:
+        # Try __version__ string first
+        match = self.VERSION_PATTERN.search(content)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        
+        # Try VERSION tuple
+        match = self.VERSION_TUPLE_PATTERN.search(content)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        
+        return None
+    
+    def set_version(self, content: str, version: Tuple[int, int, int]) -> str:
+        # Update __version__ string
+        content = self.VERSION_PATTERN.sub(
+            f'__version__ = "{version[0]}.{version[1]}.{version[2]}"',
+            content
+        )
+        
+        # Update VERSION tuple if present
+        content = self.VERSION_TUPLE_PATTERN.sub(
+            f'VERSION = ({version[0]}, {version[1]}, {version[2]})',
+            content
+        )
+        
+        return content
+
+
 def detect_project_type(project_path: str) -> Optional[str]:
     """Auto-detect project type based on files present."""
+    # Check for Blender addon first
     if os.path.exists(os.path.join(project_path, "__init__.py")):
-        # Check if it's a Blender addon
         init_path = os.path.join(project_path, "__init__.py")
         with open(init_path, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
             if 'bl_info' in content:
                 return "blender_addon"
+    
+    # Check for Python App (has version.py and main.py or similar)
+    if os.path.exists(os.path.join(project_path, "version.py")):
+        # Check for typical Python app entry points
+        has_entry = any(
+            os.path.exists(os.path.join(project_path, f))
+            for f in ["main.py", "app.py", "__main__.py"]
+        )
+        if has_entry:
+            return "python_app"
     
     if os.path.exists(os.path.join(project_path, "package.json")):
         return "npm"
@@ -168,6 +225,7 @@ def get_parser(project_type: str, **kwargs) -> Optional[VersionParser]:
         "blender_addon": BlenderAddonParser,
         "npm": PackageJsonParser,
         "python": PyProjectParser,
+        "python_app": PythonAppParser,
     }
     
     if project_type == "custom":

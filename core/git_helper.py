@@ -133,8 +133,11 @@ class GitHelper:
         except subprocess.CalledProcessError:
             return False
     
-    def get_remote_file_content(self, filepath: str, remote: str = "origin", ref: str = "HEAD") -> Optional[str]:
+    def get_remote_file_content(self, filepath: str, remote: str = "origin", ref: str = None) -> Optional[str]:
         """Get content of a file from remote."""
+        # Use current branch if ref not specified
+        if ref is None:
+            ref = self.get_current_branch() or "main"
         result = self._run_git(["show", f"{remote}/{ref}:{filepath}"], check=False)
         if result.returncode == 0:
             return result.stdout

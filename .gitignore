@@ -8,9 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -24,9 +22,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
+# PyInstaller build output (keep .spec for reproducible builds)
+build/
+dist/
 *.manifest
-*.spec
 
 # IDE
 .idea/
@@ -34,13 +33,18 @@ wheels/
 *.swp
 *.swo
 
-# Config with secrets
+# Config with secrets (use config.example.json as template)
 config.json
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Packages output
-*.zip
 Packages/
+
+# Temporary files
+*.tmp
+*.log
+*.bak

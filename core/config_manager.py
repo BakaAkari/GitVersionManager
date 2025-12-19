@@ -2,6 +2,7 @@
 Config Manager - Handle configuration persistence
 """
 import os
+import sys
 import json
 from typing import Dict, List, Optional, Any
 
@@ -29,12 +30,18 @@ class ConfigManager:
         if config_path:
             self.config_path = config_path
         else:
-            # Default to user's home directory
-            self.config_path = os.path.join(
-                os.path.expanduser("~"),
-                ".git_version_manager",
-                "config.json"
-            )
+            # Check if running as compiled exe
+            if getattr(sys, 'frozen', False):
+                # Running as compiled exe - use ./data/config.json
+                exe_dir = os.path.dirname(sys.executable)
+                self.config_path = os.path.join(exe_dir, "data", "config.json")
+            else:
+                # Running as script - use home directory
+                self.config_path = os.path.join(
+                    os.path.expanduser("~"),
+                    ".git_version_manager",
+                    "config.json"
+                )
         self.config = self.DEFAULT_CONFIG.copy()
         self.load()
     
