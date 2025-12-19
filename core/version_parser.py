@@ -144,22 +144,37 @@ class PythonAppParser(VersionParser):
     """
     Parser for Python compiled exe applications.
     
-    Version file: version.py
-    Format:
-        __version__ = "1.0.0"
-        VERSION = (1, 0, 0)  # optional tuple format
+    Version file: version.txt (preferred) or version.py
+    Supported formats:
+        1. Simple: "0.1.3" (just the version number)
+        2. Python: __version__ = "1.0.0"
+        3. Tuple: VERSION = (1, 0, 0)
     """
     
+    # Match simple version format: 0.1.3 (just digits and dots)
+    SIMPLE_VERSION_PATTERN = re.compile(r'^(\d+)\.(\d+)\.(\d+)\s*$', re.MULTILINE)
     # Match __version__ = "x.y.z" or __version__ = 'x.y.z'
     VERSION_PATTERN = re.compile(r'__version__\s*=\s*["\'](\d+)\.(\d+)\.(\d+)["\']')
     # Match VERSION = (x, y, z)
     VERSION_TUPLE_PATTERN = re.compile(r'VERSION\s*=\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)')
     
+    def __init__(self, project_path: str = None):
+        self.project_path = project_path
+    
     def get_version_file(self) -> str:
-        return "version.py"
+        # Always prefer version.txt
+        if self.project_path:
+            if os.path.exists(os.path.join(self.project_path, "version.txt")):
+                return "version.txt"
+        return "version.txt"  # default to version.txt
     
     def get_version(self, content: str) -> Optional[Tuple[int, int, int]]:
-        # Try __version__ string first
+        # Try simple version format first (just "0.1.3")
+        match = self.SIMPLE_VERSION_PATTERN.search(content)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        
+        # Try __version__ string
         match = self.VERSION_PATTERN.search(content)
         if match:
             return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
@@ -172,17 +187,25 @@ class PythonAppParser(VersionParser):
         return None
     
     def set_version(self, content: str, version: Tuple[int, int, int]) -> str:
-        # Update __version__ string
-        content = self.VERSION_PATTERN.sub(
-            f'__version__ = "{version[0]}.{version[1]}.{version[2]}"',
-            content
-        )
+        version_str = f"{version[0]}.{version[1]}.{version[2]}"
+        
+        # Check if simple format (just version number)
+        if self.SIMPLE_VERSION_PATTERN.search(content):
+            return version_str + "\n"
+        
+        # Update __version__ string if present
+        if self.VERSION_PATTERN.search(content):
+            content = self.VERSION_PATTERN.sub(
+                f'__version__ = "{version_str}"',
+                content
+            )
         
         # Update VERSION tuple if present
-        content = self.VERSION_TUPLE_PATTERN.sub(
-            f'VERSION = ({version[0]}, {version[1]}, {version[2]})',
-            content
-        )
+        if self.VERSION_TUPLE_PATTERN.search(content):
+            content = self.VERSION_TUPLE_PATTERN.sub(
+                f'VERSION = ({version[0]}, {version[1]}, {version[2]})',
+                content
+            )
         
         return content
 
@@ -197,8 +220,12 @@ def detect_project_type(project_path: str) -> Optional[str]:
             if 'bl_info' in content:
                 return "blender_addon"
     
-    # Check for Python App (has version.py and main.py or similar)
-    if os.path.exists(os.path.join(project_path, "version.py")):
+    # Check for Python App (has version.py or version.txt and main.py or similar)
+    version_file_exists = (
+        os.path.exists(os.path.join(project_path, "version.py")) or
+        os.path.exists(os.path.join(project_path, "version.txt"))
+    )
+    if version_file_exists:
         # Check for typical Python app entry points
         has_entry = any(
             os.path.exists(os.path.join(project_path, f))
@@ -221,17 +248,20 @@ def detect_project_type(project_path: str) -> Optional[str]:
 
 def get_parser(project_type: str, **kwargs) -> Optional[VersionParser]:
     """Get the appropriate parser for a project type."""
-    parsers = {
-        "blender_addon": BlenderAddonParser,
-        "npm": PackageJsonParser,
-        "python": PyProjectParser,
-        "python_app": PythonAppParser,
-    }
-    
     if project_type == "custom":
         version_file = kwargs.get("version_file", "version.txt")
         pattern = kwargs.get("version_pattern", r"(\d+)\.(\d+)\.(\d+)")
         return CustomParser(version_file, pattern)
+    
+    if project_type == "python_app":
+        project_path = kwargs.get("project_path")
+        return PythonAppParser(project_path)
+    
+    parsers = {
+        "blender_addon": BlenderAddonParser,
+        "npm": PackageJsonParser,
+        "python": PyProjectParser,
+    }
     
     parser_class = parsers.get(project_type)
     if parser_class:

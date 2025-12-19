@@ -90,7 +90,7 @@ class RefreshWorker(QThread):
         
         # Local version
         self.progress.emit("🏷️ 读取本地版本...")
-        parser = get_parser(self.project_type)
+        parser = get_parser(self.project_type, project_path=self.project_path)
         if parser:
             version_file = os.path.join(self.project_path, parser.get_version_file())
             if os.path.exists(version_file):
@@ -100,7 +100,7 @@ class RefreshWorker(QThread):
                 if local_version:
                     result["local_version"] = local_version
                     self.progress.emit(f"  本地版本: {VersionParser.version_to_string(local_version)}")
-                    self.update_label.emit("local_version", VersionParser.version_to_string(local_version), "#333")
+                    self.update_label.emit("local_version", VersionParser.version_to_string(local_version), "#d0d0d0")
         
         # Per-platform remote versions
         platform_status = {}
@@ -138,10 +138,10 @@ class RefreshWorker(QThread):
                             color = "orange"
                         else:
                             status = f"✅ {version_str} (已同步)"
-                            color = "#333"
+                            color = "#d0d0d0"
                     else:
                         status = version_str
-                        color = "#333"
+                        color = "#d0d0d0"
                     
                     platform_status[platform] = (status, color)
                     self.progress.emit(f"  ✅ {platform}: {status}")
@@ -323,7 +323,7 @@ class ProjectStatusWorker(QThread):
         
         # Get local version
         local_version_str = ""
-        parser = get_parser(project_type)
+        parser = get_parser(project_type, project_path=path)
         if parser:
             version_file = os.path.join(path, parser.get_version_file())
             if os.path.exists(version_file):
@@ -1359,6 +1359,7 @@ class MainWindow(QMainWindow):
         info_layout.addRow("类型:", self.type_label)
         
         self.local_version_label = QLabel("-")
+        self.local_version_label.setStyleSheet("color: #b0b0b0;")
         info_layout.addRow("本地版本:", self.local_version_label)
         
         # Per-platform remote versions
@@ -1368,15 +1369,15 @@ class MainWindow(QMainWindow):
         remote_versions_layout.setSpacing(2)
         
         self.github_version_label = QLabel("▶ GitHub: -")
-        self.github_version_label.setStyleSheet("color: #333;")
+        self.github_version_label.setStyleSheet("color: #b0b0b0;")
         remote_versions_layout.addWidget(self.github_version_label)
         
         self.gitee_version_label = QLabel("▶ Gitee: -")
-        self.gitee_version_label.setStyleSheet("color: #333;")
+        self.gitee_version_label.setStyleSheet("color: #b0b0b0;")
         remote_versions_layout.addWidget(self.gitee_version_label)
         
         self.gitea_version_label = QLabel("▶ Gitea: -")
-        self.gitea_version_label.setStyleSheet("color: #333;")
+        self.gitea_version_label.setStyleSheet("color: #b0b0b0;")
         remote_versions_layout.addWidget(self.gitea_version_label)
         
         info_layout.addRow("远程版本:", self.remote_versions_widget)
@@ -1686,7 +1687,7 @@ class MainWindow(QMainWindow):
         path = self.current_project.get("path", "")
         project_type = self.current_project.get("type", "")
         
-        parser = get_parser(project_type)
+        parser = get_parser(project_type, project_path=path)
         if not parser:
             self.log("❌ 无法解析版本文件")
             return
@@ -1728,7 +1729,7 @@ class MainWindow(QMainWindow):
         project_type = self.current_project.get("type", "")
         
         # Get version
-        parser = get_parser(project_type)
+        parser = get_parser(project_type, project_path=path)
         version = "0.0.0"
         if parser:
             version_file = os.path.join(path, parser.get_version_file())
@@ -1774,7 +1775,7 @@ class MainWindow(QMainWindow):
             return
         
         # Get version
-        parser = get_parser(project_type)
+        parser = get_parser(project_type, project_path=path)
         version = "0.0.0"
         if parser:
             version_file = os.path.join(path, parser.get_version_file())
