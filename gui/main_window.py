@@ -1936,7 +1936,6 @@ class MainWindow(QMainWindow):
                 return
         
         self.log(f"🚀 开始发布 {project_name} v{version}...")
-        self.publish_btn.setEnabled(False)
         
         # Create and start worker
         self.publish_worker = PublishWorker(
@@ -1949,7 +1948,6 @@ class MainWindow(QMainWindow):
     
     def on_publish_finished(self, results: dict):
         """Handle publish completion."""
-        self.publish_btn.setEnabled(True)
         self.refresh_project()
 
     
