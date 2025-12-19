@@ -1164,11 +1164,80 @@ class SyncDialog(QDialog):
     def do_publish(self):
         """Publish project to configured platforms."""
         main_window = self.parent()
-        if main_window and hasattr(main_window, 'publish_project'):
-            self.log("🚀 开始发布...")
-            main_window.publish_project()
-        else:
-            self.log("❌ 无法访问发布功能")
+        if not main_window or not hasattr(main_window, 'current_project') or not main_window.current_project:
+            self.log("❌ 无法访问项目信息")
+            return
+        
+        current_project = main_window.current_project
+        path = current_project.get("path", "")
+        project_name = os.path.basename(path)
+        project_type = current_project.get("type", "")
+        publish_to = current_project.get("publish_to", [])
+        
+        if not publish_to:
+            self.log("❌ 未配置发布平台")
+            QMessageBox.warning(self, "警告", "未配置发布平台")
+            return
+        
+        # Get version
+        from core.version_parser import get_parser, VersionParser
+        parser = get_parser(project_type, project_path=path)
+        version = "0.0.0"
+        if parser:
+            version_file = os.path.join(path, parser.get_version_file())
+            if os.path.exists(version_file):
+                with open(version_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                v = parser.get_version(content)
+                if v:
+                    version = VersionParser.version_to_string(v)
+        
+        # Find ZIP file
+        archive_path = main_window.config.get_archive_path() or os.path.dirname(path)
+        zip_filename = f"{project_name}_v{version}.zip"
+        zip_path = os.path.join(archive_path, zip_filename)
+        
+        self.log(f"📂 查找打包文件: {zip_filename}")
+        self.log(f"  路径: {archive_path}")
+        
+        if not os.path.exists(zip_path):
+            self.log(f"❌ 未找到打包文件: {zip_path}")
+            reply = QMessageBox.question(
+                self, "确认",
+                f"未找到打包文件: {zip_filename}\n是否先进行打包？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.do_package()
+                self.log("⚠️ 打包完成后请再次点击发布")
+                return
+            else:
+                return
+        
+        self.log(f"✅ 找到打包文件: {zip_filename}")
+        self.log(f"🚀 开始发布 {project_name} v{version}...")
+        self.log(f"  发布平台: {', '.join(publish_to)}")
+        self.set_operation_buttons_enabled(False)
+        
+        # Create and start publish worker, connect to THIS dialog's log
+        self.publish_worker = PublishWorker(
+            path, project_name, version, zip_path,
+            publish_to, current_project, main_window.config
+        )
+        self.publish_worker.progress.connect(self.log)  # Connect to dialog's log
+        self.publish_worker.finished.connect(self.on_publish_finished)
+        self.publish_worker.start()
+    
+    def on_publish_finished(self, results: dict):
+        """Handle publish completion in sync dialog."""
+        self.set_operation_buttons_enabled(True)
+        # Show summary
+        success_count = sum(1 for r in results.values() if r.get("success"))
+        total_count = len(results)
+        self.log(f"📊 发布完成: {success_count}/{total_count} 个平台成功")
+        
+        # Optionally refresh status
+        self.refresh_status_async()
     
     def open_vscode(self):
         """Open in VS Code for conflict resolution."""
