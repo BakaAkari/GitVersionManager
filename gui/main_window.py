@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QPushButton, QLabel, QFrame,
     QSplitter, QMessageBox, QFileDialog, QMenu, QAction, QProgressBar,
     QTextEdit, QGroupBox, QComboBox, QLineEdit, QDialog, QFormLayout,
-    QDialogButtonBox, QCheckBox, QTabWidget
+    QDialogButtonBox, QCheckBox, QTabWidget, QStyle
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt5.QtGui import QIcon, QColor, QFont, QDragEnterEvent, QDropEvent
@@ -21,6 +21,7 @@ from core.version_parser import detect_project_type, get_parser, VersionParser
 from core.packager import Packager
 from core.publisher import get_publisher
 from core.config_manager import ConfigManager
+from gui.icon_utils import IconUtils
 
 
 class WorkerThread(QThread):
@@ -87,6 +88,10 @@ class RefreshWorker(QThread):
         # Check local changes
         self.progress.emit("📂 检查本地修改...")
         result["has_changes"] = git.has_local_changes()
+        if result["has_changes"]:
+            result["changed_files"] = git.get_changed_files()
+        else:
+            result["changed_files"] = []
         
         # Local version
         self.progress.emit("🏷️ 读取本地版本...")
@@ -384,9 +389,11 @@ class ProjectItem(QListWidgetItem):
     
     def update_display(self):
         name = os.path.basename(self.project_data.get("path", "Unknown"))
-        icon = self.STATUS_ICONS.get(self.status, "❓")
         version_str = f" v{self.local_version}" if self.local_version else ""
-        self.setText(f"{icon} {name}{version_str}")
+        
+        # Use proper icon
+        self.setIcon(IconUtils.get_status_icon(self.status))
+        self.setText(f"{name}{version_str}")
     
     def set_status(self, status: str, local_version: str = None):
         self.status = status
@@ -394,11 +401,12 @@ class ProjectItem(QListWidgetItem):
             self.local_version = local_version
         self.update_display()
     
-    def set_cached_status(self, platform_status: dict, has_changes: bool, ahead: int, behind: int):
+    def set_cached_status(self, platform_status: dict, has_changes: bool, ahead: int, behind: int, changed_files: list = None):
         """Store cached detailed status info."""
         import datetime
         self.cached_status = {
             "has_changes": has_changes,
+            "changed_files": changed_files or [],
             "ahead": ahead,
             "behind": behind,
             "platform_status": platform_status,
@@ -1308,6 +1316,9 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         self.setAcceptDrops(True)
         
+        # 版本信息缓存 - 避免重复读取文件
+        self._current_version_info = None
+        
         self.setup_ui()
         self.load_projects()
     
@@ -1333,7 +1344,8 @@ class MainWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         add_btn = QPushButton("+ 添加")
         add_btn.clicked.connect(self.add_project)
-        settings_btn = QPushButton("⚙")
+        settings_btn = QPushButton("")
+        settings_btn.setIcon(IconUtils.create_menu_icon())
         settings_btn.setFixedWidth(40)
         settings_btn.clicked.connect(self.open_settings)
         btn_layout.addWidget(add_btn)
@@ -1391,15 +1403,18 @@ class MainWindow(QMainWindow):
         actions_group = QGroupBox("操作")
         actions_layout = QHBoxLayout(actions_group)
         
-        self.refresh_btn = QPushButton("🔄 刷新")
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.refresh_btn.clicked.connect(self.refresh_project)
         actions_layout.addWidget(self.refresh_btn)
         
-        self.bump_btn = QPushButton("⬆️ 版本+1")
+        self.bump_btn = QPushButton("版本+1")
+        self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
         self.bump_btn.clicked.connect(self.bump_version)
         actions_layout.addWidget(self.bump_btn)
         
-        self.sync_btn = QPushButton("🔄 同步管理")
+        self.sync_btn = QPushButton("同步管理")
+        self.sync_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         self.sync_btn.clicked.connect(self.open_sync_dialog)
         actions_layout.addWidget(self.sync_btn)
         
@@ -1517,11 +1532,86 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "项目已存在")
     
+    def update_bump_button_state(self):
+        """Update bump button text based on version existence using parser."""
+        if not self.current_project or not self._current_version_info:
+            self.bump_btn.setText("⬆️ 版本+1")
+            self.bump_btn.setEnabled(True)
+            return
+        
+        # 使用缓存的版本信息，不再重复读文件
+        version_exists = self._current_version_info.get('exists', False)
+        version = self._current_version_info.get('version')
+        project_type = self.current_project.get("type", "")
+        file_path = self._current_version_info.get('file_path', "")
+        version_filename = os.path.basename(file_path) if file_path else ""
+        
+        # 获取修改文件列表
+        changed_files = []
+        if self.current_item:
+            changed_files = self.current_item.cached_status.get("changed_files", [])
+        
+        self.bump_btn.setEnabled(True)
+        
+        if not version_exists:
+            # 文件不存在
+            self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
+            if project_type == "python_app":
+                self.bump_btn.setText("创建版本")
+            else:
+                self.bump_btn.setText("版本+1")
+        elif version:
+            # 有版本号，检查是否已修改
+            if version_filename in changed_files:
+                self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton)) # Checked icon?
+                self.bump_btn.setText("版本已更新")
+                self.bump_btn.setEnabled(False) # 已更新则禁用
+            else:
+                self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+                self.bump_btn.setText("强制升级")
+        else:
+            # 文件存在但无法解析版本
+            self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+            if project_type == "python_app":
+                self.bump_btn.setText("创建版本")
+            else:
+                self.bump_btn.setText("版本+1")
+    
     def on_project_selected(self, item: ProjectItem):
         """Handle project selection - display cached status."""
         self.current_project = item.project_data
         self.current_item = item  # Store reference to current item
         self.update_project_display()
+        
+        # 读取并缓存版本信息（只读一次）
+        path = item.project_data.get("path", "")
+        project_type = item.project_data.get("type", "")
+        parser = get_parser(project_type, project_path=path)
+        
+        if parser:
+            version_file = os.path.join(path, parser.get_version_file())
+            version_exists = os.path.exists(version_file)
+            version = None
+            
+            if version_exists:
+                try:
+                    with open(version_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    version = parser.get_version(content)
+                except:
+                    pass
+            
+            # 缓存版本信息
+            self._current_version_info = {
+                'version': version,
+                'file_path': version_file,
+                'exists': version_exists
+            }
+        else:
+            self._current_version_info = None
+        
+        # 使用缓存更新按钮
+        self.update_bump_button_state()
         
         # Display cached status from ProjectItem
         if item.local_version:
@@ -1676,11 +1766,34 @@ class MainWindow(QMainWindow):
             current_item.set_status(result.get("item_status", "unknown"))
             # Cache the detailed status
             current_item.set_cached_status(
-                platform_status, has_changes, ahead, behind
+                platform_status, has_changes, ahead, behind, result.get("changed_files")
             )
+        
+        # 自动版本升级逻辑
+        if has_changes and self.current_project:
+            changed_files = result.get("changed_files", [])
+            path = self.current_project.get("path", "")
+            project_type = self.current_project.get("type", "")
+            parser = get_parser(project_type, project_path=path)
+            
+            should_bump = True
+            if parser:
+                version_file_name = parser.get_version_file()
+                # 简单检查文件名是否在修改列表中
+                # git status 通常返回相对路径，parser 也是返回文件名
+                if version_file_name in changed_files:
+                    should_bump = False
+            
+            if should_bump:
+                self.log("🤖 检测到未提交修改，自动升级版本...")
+                self.bump_version()
+        
+        # 更新按钮状态
+        self.update_bump_button_state()
+
     
     def bump_version(self):
-        """Bump the patch version."""
+        """Bump the patch version or create version.txt if not exists."""
         if not self.current_project:
             return
         
@@ -1693,8 +1806,22 @@ class MainWindow(QMainWindow):
             return
         
         version_file = os.path.join(path, parser.get_version_file())
+        
+        # Create version.txt if it doesn't exist
         if not os.path.exists(version_file):
-            self.log(f"❌ 版本文件不存在: {version_file}")
+            initial_version = "0.0.1\n"
+            with open(version_file, 'w', encoding='utf-8') as f:
+                f.write(initial_version)
+            self.log(f"📝 创建版本文件: {version_file}")
+            self.log(f"🏷️ 初始版本: 0.0.1")
+            # 更新缓存
+            self._current_version_info = {
+                'version': (0, 0, 1),
+                'file_path': version_file,
+                'exists': True
+            }
+            self.update_bump_button_state()
+            self.refresh_project()
             return
         
         with open(version_file, 'r', encoding='utf-8') as f:
@@ -1710,6 +1837,9 @@ class MainWindow(QMainWindow):
         
         with open(version_file, 'w', encoding='utf-8') as f:
             f.write(new_content)
+        
+        # 更新缓存
+        self._current_version_info['version'] = new_version
         
         self.log(f"✅ 版本已更新: {VersionParser.version_to_string(current_version)} → {VersionParser.version_to_string(new_version)}")
         self.refresh_project()

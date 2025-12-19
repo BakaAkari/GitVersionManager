@@ -15,14 +15,24 @@ class GitHelper:
     def _run_git(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command."""
         cmd = ["git"] + args
-        return subprocess.run(
-            cmd, 
-            cwd=self.repo_path, 
-            capture_output=True, 
-            encoding='utf-8', 
-            errors='ignore',
-            check=check
-        )
+        try:
+            return subprocess.run(
+                cmd, 
+                cwd=self.repo_path, 
+                capture_output=True, 
+                encoding='utf-8', 
+                errors='ignore',
+                check=check,
+                timeout=10  # 防止网络慢时卡死
+            )
+        except subprocess.TimeoutExpired as e:
+            print(f"Git command timed out: {cmd}")
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr=f"Command timed out after 10s: {str(e)}"
+            )
     
     def is_git_repo(self) -> bool:
         """Check if the path is a git repository."""
