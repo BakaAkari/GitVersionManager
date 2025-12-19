@@ -64,21 +64,48 @@ class Packager:
         if os.path.exists(output_path):
             os.remove(output_path)
         
-        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(self.project_path):
-                # Filter directories in place
-                dirs[:] = [d for d in dirs if not self._should_ignore(d)]
+        # Create ZIP with better error handling
+        file_count = 0
+        try:
+            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(self.project_path):
+                    # Filter directories in place
+                    dirs[:] = [d for d in dirs if not self._should_ignore(d)]
+                    
+                    for file in files:
+                        if self._should_ignore(file):
+                            continue
+                        
+                        try:
+                            file_path = os.path.join(root, file)
+                            # Create archive path with project name as root
+                            rel_path = os.path.relpath(file_path, self.project_path)
+                            arcname = os.path.join(self.project_name, rel_path)
+                            
+                            zipf.write(file_path, arcname)
+                            file_count += 1
+                        except Exception as e:
+                            # Log but continue if single file fails
+                            print(f"Warning: Failed to add {file} to ZIP: {e}")
+            
+            # Verify ZIP was created and has content
+            if not os.path.exists(output_path):
+                raise FileNotFoundError(f"ZIP file was not created: {output_path}")
+            
+            if os.path.getsize(output_path) == 0:
+                raise ValueError(f"ZIP file is empty (0 bytes): {output_path}")
+            
+            if file_count == 0:
+                raise ValueError(f"No files were added to ZIP from: {self.project_path}")
                 
-                for file in files:
-                    if self._should_ignore(file):
-                        continue
-                    
-                    file_path = os.path.join(root, file)
-                    # Create archive path with project name as root
-                    rel_path = os.path.relpath(file_path, self.project_path)
-                    arcname = os.path.join(self.project_name, rel_path)
-                    
-                    zipf.write(file_path, arcname)
+        except Exception as e:
+            # Clean up partial ZIP file
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass
+            raise
         
         return output_path
     
@@ -119,14 +146,41 @@ class Packager:
         if os.path.exists(output_path):
             os.remove(output_path)
         
-        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(source_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    # Create archive path with project name as root
-                    rel_path = os.path.relpath(file_path, source_path)
-                    arcname = os.path.join(self.project_name, rel_path)
-                    zipf.write(file_path, arcname)
+        # Create ZIP with better error handling
+        file_count = 0
+        try:
+            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(source_path):
+                    for file in files:
+                        try:
+                            file_path = os.path.join(root, file)
+                            # Create archive path with project name as root
+                            rel_path = os.path.relpath(file_path, source_path)
+                            arcname = os.path.join(self.project_name, rel_path)
+                            zipf.write(file_path, arcname)
+                            file_count += 1
+                        except Exception as e:
+                            # Log but continue if single file fails
+                            print(f"Warning: Failed to add {file} to ZIP: {e}")
+            
+            # Verify ZIP was created and has content
+            if not os.path.exists(output_path):
+                raise FileNotFoundError(f"ZIP file was not created: {output_path}")
+            
+            if os.path.getsize(output_path) == 0:
+                raise ValueError(f"ZIP file is empty (0 bytes): {output_path}")
+            
+            if file_count == 0:
+                raise ValueError(f"No files were added to ZIP from: {source_path}")
+                
+        except Exception as e:
+            # Clean up partial ZIP file
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass
+            raise
         
         return output_path
     

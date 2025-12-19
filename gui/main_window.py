@@ -181,6 +181,51 @@ class RefreshWorker(QThread):
         self.finished.emit(result)
 
 
+class BuildWorker(QThread):
+    """Worker thread for building project (compiling)."""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)  # success, message
+    
+    def __init__(self, build_script: str):
+        super().__init__()
+        self.build_script = build_script
+    
+    def run(self):
+        try:
+            self.progress.emit(f"🔨 执行构建脚本: {os.path.basename(self.build_script)}...")
+            import subprocess
+            
+            # Use Popen for real-time output
+            process = subprocess.Popen(
+                [self.build_script], 
+                cwd=os.path.dirname(self.build_script),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='mbcs',
+                errors='replace',
+                shell=True,
+                bufsize=1
+            )
+            
+            # Stream output
+            for line in process.stdout:
+                self.progress.emit(f"  > {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                self.progress.emit(f"❌ 构建失败 (Code {process.returncode})")
+                self.finished.emit(False, f"Build script failed with code {process.returncode}")
+                return
+            
+            self.progress.emit("✅ 构建脚本执行成功")
+            self.finished.emit(True, "构建成功")
+        except Exception as e:
+            self.progress.emit(f"❌ 构建失败: {e}")
+            self.finished.emit(False, str(e))
+
+
 class PackageWorker(QThread):
     """Worker thread for packaging project."""
     progress = pyqtSignal(str)
@@ -196,18 +241,46 @@ class PackageWorker(QThread):
     
     def run(self):
         self.progress.emit(f"📦 开始打包 {self.project_name}...")
+        self.progress.emit(f"  📂 输出目录: {self.archive_path}")
         
         try:
+            self.progress.emit("⏳ 打包正在进行中...")
             packager = Packager(self.project_path, self.project_name, self.archive_path)
             
             # Use dist packaging for python_app (compiled exe projects)
             if self.project_type == "python_app":
                 self.progress.emit("📂 打包 dist/ 编译文件...")
+                self.progress.emit(f"  📁 源路径: {self.project_path}")
+                self.progress.emit(f"  📁 目标路径: {self.archive_path}")
+                self.progress.emit(f"  🏷️ 版本: {self.version}")
+                
+                # Check if dist folder exists
+                dist_path = os.path.join(self.project_path, "dist")
+                if not os.path.exists(dist_path):
+                    raise FileNotFoundError(f"❌ dist/ 文件夹不存在: {dist_path}\n请先执行编译项目！")
+                
+                # List dist contents
+                dist_contents = os.listdir(dist_path)
+                self.progress.emit(f"  📦 dist/ 内容: {', '.join(dist_contents) if dist_contents else '(空)'}")
+                
+                if not dist_contents:
+                    raise FileNotFoundError(f"❌ dist/ 文件夹为空: {dist_path}\n请先执行编译项目！")
+                
                 zip_path = packager.create_dist_zip(self.version)
             else:
                 self.progress.emit("📂 收集源文件...")
+                self.progress.emit(f"  📁 源路径: {self.project_path}")
+                self.progress.emit(f"  📁 目标路径: {self.archive_path}")
+                self.progress.emit(f"  🏷️ 版本: {self.version}")
                 zip_path = packager.create_zip(self.version)
             
+            if not os.path.exists(zip_path):
+                raise FileNotFoundError(f"❌ 无法创建 ZIP 文件: {zip_path}")
+            
+            # Get file size
+            zip_size = os.path.getsize(zip_path)
+            zip_size_mb = zip_size / (1024 * 1024)
+            self.progress.emit(f"  📦 文件大小: {zip_size_mb:.2f} MB")
             self.progress.emit(f"✅ 打包完成: {zip_path}")
             self.finished.emit(True, zip_path)
         except Exception as e:
@@ -730,6 +803,14 @@ class SyncDialog(QDialog):
         package_tab = QWidget()
         package_layout = QVBoxLayout(package_tab)
         
+        # Build section (only for python_app)
+        self.build_section = QGroupBox("🔨 编译项目")
+        build_section_layout = QVBoxLayout(self.build_section)
+        self.build_btn = QPushButton("🔨 编译项目 (执行 .bat)")
+        self.build_btn.clicked.connect(self.do_build)
+        build_section_layout.addWidget(self.build_btn)
+        package_layout.addWidget(self.build_section)
+        
         # Package section
         package_layout.addWidget(QLabel("📦 打包项目"))
         self.package_btn = QPushButton("📦 创建 ZIP 包")
@@ -747,6 +828,9 @@ class SyncDialog(QDialog):
         
         package_layout.addStretch()
         self.tabs.addTab(package_tab, "📦 打包发布")
+        
+        # Show/hide build section based on project type
+        self.update_build_section_visibility()
         
         # === Tab 5: Conflict ===
         conflict_tab = QWidget()
@@ -782,9 +866,29 @@ class SyncDialog(QDialog):
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
+        
+        # Ensure all operation buttons are enabled initially
+        self.set_operation_buttons_enabled(True)
+    
+    def showEvent(self, event):
+        """Handle dialog show event."""
+        super().showEvent(event)
+        # Ensure buttons are enabled when dialog is shown
+        self.set_operation_buttons_enabled(True)
+        # Update build section visibility
+        self.update_build_section_visibility()
     
     def log(self, msg: str):
         self.log_text.append(msg)
+    
+    def update_build_section_visibility(self):
+        """Show/hide build section based on project type."""
+        main_window = self.parent()
+        if main_window and hasattr(main_window, 'current_project') and main_window.current_project:
+            project_type = main_window.current_project.get("type", "")
+            self.build_section.setVisible(project_type == "python_app")
+        else:
+            self.build_section.setVisible(False)
     
     def set_operation_buttons_enabled(self, enabled: bool):
         """Enable/disable all operation buttons."""
@@ -792,6 +896,7 @@ class SyncDialog(QDialog):
         self.force_push_btn.setEnabled(enabled)
         self.push_all_btn.setEnabled(enabled)
         self.commit_push_btn.setEnabled(enabled)
+        self.build_btn.setEnabled(enabled)
         self.package_btn.setEnabled(enabled)
         self.publish_btn.setEnabled(enabled)
         self.refresh_btn.setEnabled(enabled)
@@ -851,6 +956,8 @@ class SyncDialog(QDialog):
     def on_status_check_finished(self):
         """Handle status check completion."""
         self.refresh_btn.setEnabled(True)
+        # Ensure operation buttons are enabled after status check
+        self.set_operation_buttons_enabled(True)
         self.check_conflicts()
     
     def check_conflicts(self):
@@ -965,14 +1072,94 @@ class SyncDialog(QDialog):
         self.set_operation_buttons_enabled(True)
         self.refresh_status_async()
     
+    def do_build(self):
+        """Build the project (execute build script for python_app)."""
+        main_window = self.parent()
+        if not main_window or not hasattr(main_window, 'current_project') or not main_window.current_project:
+            self.log("❌ 无法访问项目信息")
+            return
+        
+        current_project = main_window.current_project
+        path = current_project.get("path", "")
+        project_type = current_project.get("type", "")
+        
+        if project_type != "python_app":
+            self.log("❌ 只有 python_app 类型需要编译")
+            return
+        
+        # Prompt user for build script
+        default_dir = path
+        if os.path.exists(os.path.join(path, "build.bat")):
+            default_dir = os.path.join(path, "build.bat")
+        
+        build_script, _ = QFileDialog.getOpenFileName(
+            self, "选择构建脚本 (.bat)", default_dir, "Batch Files (*.bat);;All Files (*)"
+        )
+        
+        if not build_script:
+            self.log("⚠️ 已取消编译 (未选择构建脚本)")
+            return
+        
+        self.log(f"🔨 开始编译项目...")
+        self.set_operation_buttons_enabled(False)
+        
+        # Create and start build worker
+        self.build_worker = BuildWorker(build_script)
+        self.build_worker.progress.connect(self.log)
+        self.build_worker.finished.connect(self.on_build_finished)
+        self.build_worker.start()
+    
+    def on_build_finished(self, success: bool, result: str):
+        """Handle build completion in sync dialog."""
+        self.set_operation_buttons_enabled(True)
+        if success:
+            self.log(f"✅ 编译成功，可以执行打包了")
+        else:
+            self.log(f"❌ 编译失败: {result}")
+    
     def do_package(self):
         """Package the project as ZIP."""
         main_window = self.parent()
-        if main_window and hasattr(main_window, 'package_project'):
-            self.log("📦 开始打包...")
-            main_window.package_project()
+        if not main_window or not hasattr(main_window, 'current_project') or not main_window.current_project:
+            self.log("❌ 无法访问项目信息")
+            return
+        
+        current_project = main_window.current_project
+        path = current_project.get("path", "")
+        project_name = os.path.basename(path)
+        project_type = current_project.get("type", "")
+        
+        # Get version
+        from core.version_parser import get_parser, VersionParser
+        parser = get_parser(project_type, project_path=path)
+        version = "0.0.0"
+        if parser:
+            version_file = os.path.join(path, parser.get_version_file())
+            if os.path.exists(version_file):
+                with open(version_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                v = parser.get_version(content)
+                if v:
+                    version = VersionParser.version_to_string(v)
+        
+        archive_path = main_window.config.get_archive_path() or os.path.dirname(path)
+        
+        self.log(f"📦 开始打包 {project_name}...")
+        self.set_operation_buttons_enabled(False)
+        
+        # Create and start worker, connect to THIS dialog's log
+        self.package_worker = PackageWorker(path, project_name, archive_path, version, project_type)
+        self.package_worker.progress.connect(self.log)  # Connect to dialog's log
+        self.package_worker.finished.connect(self.on_package_finished)
+        self.package_worker.start()
+    
+    def on_package_finished(self, success: bool, result: str):
+        """Handle package completion in sync dialog."""
+        self.set_operation_buttons_enabled(True)
+        if success:
+            self.log(f"✅ 打包成功: {result}")
         else:
-            self.log("❌ 无法访问打包功能")
+            self.log(f"❌ 打包失败: {result}")
     
     def do_publish(self):
         """Publish project to configured platforms."""
@@ -1843,6 +2030,51 @@ class MainWindow(QMainWindow):
         
         self.log(f"✅ 版本已更新: {VersionParser.version_to_string(current_version)} → {VersionParser.version_to_string(new_version)}")
         self.refresh_project()
+    
+    def build_project(self):
+        """Build the project (execute build script for python_app)."""
+        if not self.current_project:
+            return
+        
+        # Prevent multiple simultaneous operations
+        if hasattr(self, 'build_worker') and self.build_worker and self.build_worker.isRunning():
+            self.log("⏳ 编译正在进行中...")
+            return
+        
+        path = self.current_project.get("path", "")
+        project_type = self.current_project.get("type", "")
+        
+        if project_type != "python_app":
+            self.log("❌ 只有 python_app 类型需要编译")
+            return
+        
+        # Prompt user for build script
+        default_dir = path
+        if os.path.exists(os.path.join(path, "build.bat")):
+            default_dir = os.path.join(path, "build.bat")
+        
+        build_script, _ = QFileDialog.getOpenFileName(
+            self, "选择构建脚本 (.bat)", default_dir, "Batch Files (*.bat);;All Files (*)"
+        )
+        
+        if not build_script:
+            self.log("⚠️ 已取消编译 (未选择构建脚本)")
+            return
+        
+        self.log(f"🔨 开始编译项目...")
+        
+        # Create and start build worker
+        self.build_worker = BuildWorker(build_script)
+        self.build_worker.progress.connect(self.log)
+        self.build_worker.finished.connect(self.on_build_finished)
+        self.build_worker.start()
+    
+    def on_build_finished(self, success: bool, result: str):
+        """Handle build completion."""
+        if success:
+            self.log("✅ 编译成功，可以执行打包了")
+        else:
+            self.log(f"❌ 编译失败: {result}")
     
     def package_project(self):
         """Package the project as ZIP asynchronously."""
