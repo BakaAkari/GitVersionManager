@@ -78,6 +78,45 @@ class GitHelper:
                 files.append(line[3:])  # Skip status prefix
         return files
     
+    def get_changed_files_with_status(self) -> List[dict]:
+        """
+        Get list of changed files with their status.
+        Returns list of dicts with: status, path
+        Status codes: M=modified, A=added, D=deleted, R=renamed, ??=untracked
+        """
+        result = self._run_git(["status", "--porcelain"], check=False)
+        files = []
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                status = line[:2].strip()
+                path = line[3:]
+                files.append({"status": status, "path": path})
+        return files
+    
+    def revert_file(self, file_path: str) -> Tuple[bool, str]:
+        """
+        Revert a single file to HEAD version.
+        For untracked files, removes them.
+        Returns (success, message).
+        """
+        # Check if file is untracked
+        status_result = self._run_git(["status", "--porcelain", "--", file_path], check=False)
+        if status_result.stdout.strip().startswith("??"):
+            # Untracked file - remove it
+            try:
+                full_path = os.path.join(self.repo_path, file_path)
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                return True, f"已删除未跟踪文件: {file_path}"
+            except Exception as e:
+                return False, f"删除失败: {str(e)}"
+        
+        # Tracked file - checkout from HEAD
+        result = self._run_git(["checkout", "HEAD", "--", file_path], check=False)
+        if result.returncode == 0:
+            return True, f"已还原: {file_path}"
+        return False, result.stderr.strip() or "还原失败"
+    
     def get_local_head(self) -> Optional[str]:
         """Get local HEAD commit hash."""
         result = self._run_git(["rev-parse", "HEAD"], check=False)

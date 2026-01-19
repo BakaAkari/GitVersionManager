@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton,
     QLineEdit, QTextEdit, QComboBox, QCheckBox, QGroupBox, QTabWidget,
     QListWidget, QListWidgetItem, QFormLayout, QDialogButtonBox,
-    QFileDialog, QMessageBox, QInputDialog
+    QFileDialog, QMessageBox, QInputDialog, QMenu, QAction, QStyle
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QColor
@@ -126,71 +126,135 @@ class SyncDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         
-        # === Tab 1: Status ===
-        status_tab = QWidget()
-        status_layout = QVBoxLayout(status_tab)
+        # === Tab 1: 状态与同步 (合并原状态+同步+冲突) ===
+        status_sync_tab = QWidget()
+        status_sync_layout = QVBoxLayout(status_sync_tab)
+        
+        # Remote status section
+        remote_group = QGroupBox("远程仓库状态")
+        remote_group_layout = QVBoxLayout(remote_group)
         
         self.remotes_table = QListWidget()
-        self.remotes_table.setMinimumHeight(200)
-        status_layout.addWidget(self.remotes_table)
+        self.remotes_table.setMinimumHeight(100)
+        self.remotes_table.setMaximumHeight(120)
+        remote_group_layout.addWidget(self.remotes_table)
+        status_sync_layout.addWidget(remote_group)
         
-        self.refresh_btn = QPushButton("🔄 刷新状态")
+        # Local changes section (新增)
+        changes_group = QGroupBox("本地变更")
+        changes_group_layout = QVBoxLayout(changes_group)
+        
+        self.changed_files_list = QListWidget()
+        self.changed_files_list.setMinimumHeight(80)
+        self.changed_files_list.setMaximumHeight(120)
+        self.changed_files_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.changed_files_list.customContextMenuRequested.connect(self.show_file_context_menu)
+        changes_group_layout.addWidget(self.changed_files_list)
+        status_sync_layout.addWidget(changes_group)
+        
+        # Sync operation buttons
+        sync_btn_layout = QHBoxLayout()
+        
+        self.refresh_btn = QPushButton("🔄 刷新")
         self.refresh_btn.clicked.connect(self.refresh_status_async)
-        status_layout.addWidget(self.refresh_btn)
-        
-        self.tabs.addTab(status_tab, "📊 状态")
-        
-        # === Tab 2: Commit ===
-        commit_tab = QWidget()
-        commit_layout = QVBoxLayout(commit_tab)
-        
-        commit_layout.addWidget(QLabel("更新日志 (Changelog):"))
-        self.changelog_input = QTextEdit()
-        self.changelog_input.setPlaceholderText("请输入本次提交的更新内容...")
-        commit_layout.addWidget(self.changelog_input)
-        
-        self.commit_push_btn = QPushButton("💾 提交并推送到所有远程")
-        self.commit_push_btn.setStyleSheet("background-color: #4dabf5; color: white; padding: 10px;")
-        self.commit_push_btn.clicked.connect(self.do_commit_and_push_all)
-        commit_layout.addWidget(self.commit_push_btn)
-        
-        self.tabs.addTab(commit_tab, "💾 提交")
-        
-        # === Tab 3: Sync ===
-        sync_tab = QWidget()
-        sync_layout = QVBoxLayout(sync_tab)
+        sync_btn_layout.addWidget(self.refresh_btn)
         
         # Remote selector
-        remote_layout = QHBoxLayout()
-        remote_layout.addWidget(QLabel("选择远程:"))
+        sync_btn_layout.addWidget(QLabel("远程:"))
         self.remote_combo = QComboBox()
-        self.remote_combo.setMinimumWidth(200)
-        remote_layout.addWidget(self.remote_combo)
-        remote_layout.addStretch()
-        sync_layout.addLayout(remote_layout)
+        self.remote_combo.setMinimumWidth(120)
+        sync_btn_layout.addWidget(self.remote_combo)
         
-        # Pull button
-        self.pull_btn = QPushButton("⬇️ 拉取 (Pull Rebase)")
+        self.pull_btn = QPushButton("⬇️ 拉取")
         self.pull_btn.clicked.connect(self.do_pull_rebase)
-        sync_layout.addWidget(self.pull_btn)
+        sync_btn_layout.addWidget(self.pull_btn)
         
-        # Push all button
-        self.push_all_btn = QPushButton("📤 推送到所有远程")
+        self.push_all_btn = QPushButton("📤 推送所有")
         self.push_all_btn.clicked.connect(self.do_push_all)
-        sync_layout.addWidget(self.push_all_btn)
+        sync_btn_layout.addWidget(self.push_all_btn)
         
-        # Force push button
-        self.force_push_btn = QPushButton("⬆️ 强制推送 (危险)")
-        self.force_push_btn.setStyleSheet("background-color: #ff6b6b; color: white;")
-        self.force_push_btn.clicked.connect(self.do_force_push)
-        sync_layout.addWidget(self.force_push_btn)
+        status_sync_layout.addLayout(sync_btn_layout)
         
-        sync_layout.addStretch()
-        self.tabs.addTab(sync_tab, "🔄 同步")
+        # Conflict section (条件显示)
+        self.conflict_group = QGroupBox("⚠️ 冲突处理")
+        conflict_group_layout = QHBoxLayout(self.conflict_group)
         
-        # === Tab 4: Package & Publish ===
-        package_tab = QWidget()
-        package_layout = QVBoxLayout(package_tab)
+        self.conflict_label = QLabel("检查中...")
+        conflict_group_layout.addWidget(self.conflict_label)
+        
+        self.open_vscode_btn = QPushButton("📝 VS Code")
+        self.open_vscode_btn.clicked.connect(self.open_vscode)
+        self.open_vscode_btn.setEnabled(False)
+        conflict_group_layout.addWidget(self.open_vscode_btn)
+        
+        self.abort_btn = QPushButton("❌ 中止")
+        self.abort_btn.clicked.connect(self.abort_operation)
+        self.abort_btn.setEnabled(False)
+        conflict_group_layout.addWidget(self.abort_btn)
+        
+        self.conflict_group.setVisible(False)  # 默认隐藏
+        status_sync_layout.addWidget(self.conflict_group)
+        
+        self.tabs.addTab(status_sync_tab, "📊 状态与同步")
+        
+        # === Tab 2: 提交发布 (合并原提交+打包发布+版本升级) ===
+        commit_publish_tab = QWidget()
+        commit_publish_layout = QVBoxLayout(commit_publish_tab)
+        
+        # Version section (从主窗口移入)
+        version_group = QGroupBox("版本管理")
+        version_group_layout = QHBoxLayout(version_group)
+        
+        version_group_layout.addWidget(QLabel("当前版本:"))
+        self.version_label = QLabel("-")
+        self.version_label.setStyleSheet("font-weight: bold;")
+        version_group_layout.addWidget(self.version_label)
+        version_group_layout.addStretch()
+        
+        self.bump_btn = QPushButton("⬆️ 版本+1")
+        self.bump_btn.clicked.connect(self.do_bump_version)
+        version_group_layout.addWidget(self.bump_btn)
+        
+        commit_publish_layout.addWidget(version_group)
+        
+        # Commit section
+        commit_group = QGroupBox("提交更改")
+        commit_group_layout = QVBoxLayout(commit_group)
+        
+        commit_group_layout.addWidget(QLabel("更新日志:"))
+        self.changelog_input = QTextEdit()
+        self.changelog_input.setPlaceholderText("请输入本次提交的更新内容...")
+        self.changelog_input.setMaximumHeight(100)
+        commit_group_layout.addWidget(self.changelog_input)
+        
+        self.commit_push_btn = QPushButton("💾 提交并推送到所有远程")
+        self.commit_push_btn.setStyleSheet("background-color: #4dabf5; color: white; padding: 8px;")
+        self.commit_push_btn.clicked.connect(self.do_commit_and_push_all)
+        commit_group_layout.addWidget(self.commit_push_btn)
+        
+        commit_publish_layout.addWidget(commit_group)
+        
+        # Package & Publish section
+        publish_group = QGroupBox("打包与发布")
+        publish_group_layout = QHBoxLayout(publish_group)
+        
+        self.package_btn = QPushButton("📦 创建 ZIP 包")
+        self.package_btn.clicked.connect(self.do_package)
+        publish_group_layout.addWidget(self.package_btn)
+        
+        self.publish_btn = QPushButton("🚀 发布版本")
+        self.publish_btn.setStyleSheet("background-color: #51cf66; color: white;")
+        self.publish_btn.clicked.connect(self.do_publish)
+        publish_group_layout.addWidget(self.publish_btn)
+        
+        commit_publish_layout.addWidget(publish_group)
+        commit_publish_layout.addStretch()
+        
+        self.tabs.addTab(commit_publish_tab, "💾 提交发布")
+        
+        # === Tab 3: 高级操作 ===
+        advanced_tab = QWidget()
+        advanced_layout = QVBoxLayout(advanced_tab)
         
         # Build section (only for python_app)
         self.build_section = QGroupBox("🔨 编译项目")
@@ -198,56 +262,42 @@ class SyncDialog(QDialog):
         self.build_btn = QPushButton("🔨 编译项目 (执行 .bat)")
         self.build_btn.clicked.connect(self.do_build)
         build_section_layout.addWidget(self.build_btn)
-        package_layout.addWidget(self.build_section)
+        advanced_layout.addWidget(self.build_section)
         
-        # Package section
-        package_layout.addWidget(QLabel("📦 打包项目"))
-        self.package_btn = QPushButton("📦 创建 ZIP 包")
-        self.package_btn.clicked.connect(self.do_package)
-        package_layout.addWidget(self.package_btn)
+        # Danger zone
+        danger_group = QGroupBox("⚠️ 危险操作")
+        danger_group.setStyleSheet("QGroupBox { color: #ff6b6b; }")
+        danger_group_layout = QVBoxLayout(danger_group)
         
-        package_layout.addWidget(QLabel(""))  # Spacer
+        danger_group_layout.addWidget(QLabel("以下操作可能导致数据丢失，请谨慎使用"))
         
-        # Publish section
-        package_layout.addWidget(QLabel("🚀 发布版本"))
-        self.publish_btn = QPushButton("🚀 发布到配置的平台")
-        self.publish_btn.setStyleSheet("background-color: #51cf66; color: white;")
-        self.publish_btn.clicked.connect(self.do_publish)
-        package_layout.addWidget(self.publish_btn)
+        force_push_layout = QHBoxLayout()
+        force_push_layout.addWidget(QLabel("选择远程:"))
+        self.force_remote_combo = QComboBox()
+        self.force_remote_combo.setMinimumWidth(150)
+        force_push_layout.addWidget(self.force_remote_combo)
         
-        package_layout.addStretch()
-        self.tabs.addTab(package_tab, "📦 打包发布")
+        self.force_push_btn = QPushButton("⬆️ 强制推送")
+        self.force_push_btn.setStyleSheet("background-color: #ff6b6b; color: white;")
+        self.force_push_btn.clicked.connect(self.do_force_push)
+        force_push_layout.addWidget(self.force_push_btn)
+        force_push_layout.addStretch()
+        
+        danger_group_layout.addLayout(force_push_layout)
+        advanced_layout.addWidget(danger_group)
+        
+        advanced_layout.addStretch()
+        self.tabs.addTab(advanced_tab, "🔧 高级操作")
         
         # Show/hide build section based on project type
         self.update_build_section_visibility()
-        
-        # === Tab 5: Conflict ===
-        conflict_tab = QWidget()
-        conflict_layout = QVBoxLayout(conflict_tab)
-        
-        self.conflict_label = QLabel("🔄 检查中...")
-        self.conflict_label.setStyleSheet("color: gray; font-size: 14px;")
-        conflict_layout.addWidget(self.conflict_label)
-        
-        self.open_vscode_btn = QPushButton("📝 用 VS Code 解决冲突")
-        self.open_vscode_btn.clicked.connect(self.open_vscode)
-        self.open_vscode_btn.setEnabled(False)
-        conflict_layout.addWidget(self.open_vscode_btn)
-        
-        self.abort_btn = QPushButton("❌ 中止操作")
-        self.abort_btn.clicked.connect(self.abort_operation)
-        self.abort_btn.setEnabled(False)
-        conflict_layout.addWidget(self.abort_btn)
-        
-        conflict_layout.addStretch()
-        self.tabs.addTab(conflict_tab, "⚠️ 冲突")
         
         # Log (always visible at bottom, stretches with window)
         log_group = QGroupBox("日志")
         log_layout = QVBoxLayout(log_group)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(80)
+        self.log_text.setMinimumHeight(60)
         log_layout.addWidget(self.log_text)
         layout.addWidget(log_group, 1)  # stretch factor 1
         
@@ -258,6 +308,9 @@ class SyncDialog(QDialog):
         
         # Ensure all operation buttons are enabled initially
         self.set_operation_buttons_enabled(True)
+        
+        # Initialize version display
+        self.refresh_version_display()
     
     def showEvent(self, event):
         """Handle dialog show event."""
@@ -289,6 +342,7 @@ class SyncDialog(QDialog):
         self.package_btn.setEnabled(enabled)
         self.publish_btn.setEnabled(enabled)
         self.refresh_btn.setEnabled(enabled)
+        self.bump_btn.setEnabled(enabled)
     
     def refresh_status_async(self):
         """Refresh status for all remotes asynchronously."""
@@ -298,8 +352,15 @@ class SyncDialog(QDialog):
         
         self.remotes_table.clear()
         self.remote_combo.clear()
+        self.force_remote_combo.clear()
         self.refresh_btn.setEnabled(False)
         self.log("🔄 开始检查远程状态...")
+        
+        # Refresh changed files list
+        self.refresh_changed_files()
+        
+        # Refresh version display
+        self.refresh_version_display()
         
         self.sync_worker = SyncStatusWorker(self.project_path)
         self.sync_worker.progress.connect(self.log)
@@ -341,6 +402,7 @@ class SyncDialog(QDialog):
         
         self.remotes_table.addItem(item)
         self.remote_combo.addItem(f"{name} ({platform})", name)
+        self.force_remote_combo.addItem(f"{name} ({platform})", name)
     
     def on_status_check_finished(self):
         """Handle status check completion."""
@@ -357,11 +419,145 @@ class SyncDialog(QDialog):
             self.conflict_label.setStyleSheet("color: red; font-weight: bold;")
             self.open_vscode_btn.setEnabled(True)
             self.abort_btn.setEnabled(True)
+            self.conflict_group.setVisible(True)
         else:
             self.conflict_label.setText("✅ 无冲突")
             self.conflict_label.setStyleSheet("color: green;")
             self.open_vscode_btn.setEnabled(False)
             self.abort_btn.setEnabled(False)
+            self.conflict_group.setVisible(False)
+    
+    def refresh_changed_files(self):
+        """Refresh the list of changed files."""
+        self.changed_files_list.clear()
+        
+        changed_files = self.git.get_changed_files_with_status()
+        
+        for file_info in changed_files:
+            status = file_info["status"]
+            path = file_info["path"]
+            
+            # Format display text
+            status_icons = {
+                "M": "📝",   # Modified
+                "A": "➕",   # Added  
+                "D": "❌",   # Deleted
+                "R": "📛",   # Renamed
+                "??": "❓",  # Untracked
+            }
+            icon = status_icons.get(status, "📄")
+            item = QListWidgetItem(f"{icon} [{status}] {path}")
+            item.setData(Qt.UserRole, path)  # Store full path for revert
+            
+            # Set color based on status
+            if status == "M":
+                item.setForeground(QColor("orange"))
+            elif status == "A":
+                item.setForeground(QColor("green"))
+            elif status == "D":
+                item.setForeground(QColor("red"))
+            elif status == "??":
+                item.setForeground(QColor("gray"))
+            
+            self.changed_files_list.addItem(item)
+        
+        if not changed_files:
+            item = QListWidgetItem("✅ 没有未提交的更改")
+            item.setForeground(QColor("green"))
+            self.changed_files_list.addItem(item)
+    
+    def show_file_context_menu(self, pos):
+        """Show context menu for file list."""
+        item = self.changed_files_list.itemAt(pos)
+        if not item:
+            return
+        
+        file_path = item.data(Qt.UserRole)
+        if not file_path:
+            return
+        
+        menu = QMenu(self)
+        
+        revert_action = QAction("↩️ 还原此文件", self)
+        revert_action.triggered.connect(lambda: self.revert_file(item))
+        menu.addAction(revert_action)
+        
+        open_action = QAction("📂 在资源管理器中打开", self)
+        open_action.triggered.connect(lambda: self.open_file_location(file_path))
+        menu.addAction(open_action)
+        
+        menu.exec_(self.changed_files_list.mapToGlobal(pos))
+    
+    def revert_file(self, item):
+        """Revert the selected file."""
+        file_path = item.data(Qt.UserRole)
+        if not file_path:
+            return
+        
+        reply = QMessageBox.warning(
+            self, "确认还原",
+            f"确定要还原文件 '{os.path.basename(file_path)}' 吗？\n\n"
+            "此操作将丢弃所有未提交的修改，且无法恢复！",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            success, msg = self.git.revert_file(file_path)
+            if success:
+                self.log(f"✅ {msg}")
+                self.refresh_changed_files()
+            else:
+                self.log(f"❌ {msg}")
+    
+    def open_file_location(self, file_path: str):
+        """Open file location in explorer."""
+        import subprocess
+        full_path = os.path.join(self.project_path, file_path)
+        if os.path.exists(full_path):
+            subprocess.Popen(f'explorer /select,"{full_path}"', shell=True)
+        else:
+            # File might be deleted, open parent directory
+            parent_dir = os.path.dirname(full_path)
+            if os.path.exists(parent_dir):
+                subprocess.Popen(f'explorer "{parent_dir}"', shell=True)
+    
+    def refresh_version_display(self):
+        """Refresh the version display label."""
+        main_window = self.parent()
+        if main_window and hasattr(main_window, 'current_project') and main_window.current_project:
+            path = main_window.current_project.get("path", "")
+            project_type = main_window.current_project.get("type", "")
+            
+            version_service = VersionService()
+            version = version_service.get_version_string(path, project_type)
+            
+            if version:
+                self.version_label.setText(f"v{version}")
+            else:
+                self.version_label.setText("未检测到版本")
+        else:
+            self.version_label.setText("-")
+    
+    def do_bump_version(self):
+        """Bump the patch version."""
+        main_window = self.parent()
+        if not main_window or not hasattr(main_window, 'current_project') or not main_window.current_project:
+            self.log("❌ 无法访问项目信息")
+            return
+        
+        path = main_window.current_project.get("path", "")
+        project_type = main_window.current_project.get("type", "")
+        
+        version_service = VersionService()
+        result = version_service.bump_version(path, project_type, "patch")
+        
+        if result["success"]:
+            self.log(f"✅ {result['message']}")
+            self.refresh_version_display()
+            self.refresh_changed_files()
+        else:
+            self.log(f"❌ {result['message']}")
     
     def do_pull_rebase(self):
         """Pull with rebase from selected remote (async)."""
@@ -384,8 +580,9 @@ class SyncDialog(QDialog):
     
     def do_force_push(self):
         """Force push to selected remote (async)."""
-        remote = self.remote_combo.currentData()
+        remote = self.force_remote_combo.currentData()
         if not remote:
+            self.log("⚠️ 请先在高级操作页面选择远程仓库")
             return
         
         # Step 1: Warning dialog
@@ -658,7 +855,14 @@ class ProjectDialog(QDialog):
         self.setWindowTitle("编辑项目" if self.is_edit_mode else "添加项目")
         self.setMinimumWidth(600)
         self.project_data = project_data or {}
-        self.gitea_base_url = gitea_base_url
+        
+        # Get Gitea URL from ConfigManager if not provided
+        if gitea_base_url:
+            self.gitea_base_url = gitea_base_url
+        else:
+            config = ConfigManager()
+            self.gitea_base_url = config.get_gitea_url() or ""
+        
         self.original_remotes = []  # Store original git remotes for comparison
         self.setup_ui()
         
@@ -771,8 +975,11 @@ class ProjectDialog(QDialog):
             url = f"https://gitee.com/{repo}.git" if repo else "https://gitee.com/..."
             self.gitee_url_label.setText(url)
         elif platform == "gitea":
-            base = self.gitea_base_url or "https://gitea.example.com"
-            url = f"{base}/{repo}.git" if repo else f"{base}/..."
+            if self.gitea_base_url:
+                base = self.gitea_base_url.rstrip('/')
+                url = f"{base}/{repo}.git" if repo else f"{base}/..."
+            else:
+                url = "请先在设置中配置 Gitea URL" if not repo else f"[Gitea URL 未配置]/{repo}.git"
             self.gitea_url_label.setText(url)
     
     def load_git_remotes(self):
@@ -899,8 +1106,10 @@ class ProjectDialog(QDialog):
             # Use a different remote name for gitee
             new_remotes["gitee"] = f"https://gitee.com/{gitee_repo}.git"
         if self.gitea_check.isChecked() and gitea_repo:
-            base = self.gitea_base_url or "https://gitea.example.com"
-            new_remotes["gitea"] = f"{base}/{gitea_repo}.git"
+            if self.gitea_base_url:
+                base = self.gitea_base_url.rstrip('/')
+                new_remotes["gitea"] = f"{base}/{gitea_repo}.git"
+            # Skip if no Gitea URL configured
         
         # Get existing remotes
         existing = {r["name"]: r["url"] for r in git.get_remotes()}

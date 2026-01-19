@@ -72,8 +72,6 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         self.setAcceptDrops(True)
         
-        # 版本信息缓存
-        self._current_version_info = None
         
         self.setup_ui()
         self.load_projects()
@@ -164,10 +162,7 @@ class MainWindow(QMainWindow):
         self.refresh_btn.clicked.connect(self.refresh_project)
         actions_layout.addWidget(self.refresh_btn)
         
-        self.bump_btn = QPushButton("版本+1")
-        self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
-        self.bump_btn.clicked.connect(self.bump_version)
-        actions_layout.addWidget(self.bump_btn)
+
         
         self.sync_btn = QPushButton("同步管理")
         self.sync_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
@@ -287,60 +282,12 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "项目已存在")
     
-    def update_bump_button_state(self):
-        """Update bump button text based on version existence using VersionService."""
-        if not self.current_project or not self._current_version_info:
-            self.bump_btn.setText("⬆️ 版本+1")
-            self.bump_btn.setEnabled(True)
-            return
-        
-        version_exists = self._current_version_info.get('exists', False)
-        version = self._current_version_info.get('version')
-        project_type = self.current_project.get("type", "")
-        file_path = self._current_version_info.get('file_path', "")
-        version_filename = os.path.basename(file_path) if file_path else ""
-        
-        changed_files = []
-        if self.current_item:
-            changed_files = self.current_item.cached_status.get("changed_files", [])
-        
-        self.bump_btn.setEnabled(True)
-        
-        if not version_exists:
-            self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
-            if project_type == "python_app":
-                self.bump_btn.setText("创建版本")
-            else:
-                self.bump_btn.setText("版本+1")
-        elif version:
-            if version_filename in changed_files:
-                self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
-                self.bump_btn.setText("版本已更新")
-                self.bump_btn.setEnabled(False)
-            else:
-                self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
-                self.bump_btn.setText("强制升级")
-        else:
-            self.bump_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
-            if project_type == "python_app":
-                self.bump_btn.setText("创建版本")
-            else:
-                self.bump_btn.setText("版本+1")
-    
+
     def on_project_selected(self, item: ProjectItem):
         """Handle project selection - display cached status."""
         self.current_project = item.project_data
         self.current_item = item
         self.update_project_display()
-        
-        # Use VersionService to get version info
-        path = item.project_data.get("path", "")
-        project_type = item.project_data.get("type", "")
-        
-        version_info = self.version_service.get_version_info(path, project_type)
-        self._current_version_info = version_info
-        
-        self.update_bump_button_state()
         
         # Display cached status from ProjectItem
         if item.local_version:
@@ -484,29 +431,8 @@ class MainWindow(QMainWindow):
                 platform_status, has_changes, ahead, behind, result.get("changed_files")
             )
         
-        self.update_bump_button_state()
-    
-    def bump_version(self):
-        """Bump the patch version using VersionService."""
-        if not self.current_project:
-            return
         
-        path = self.current_project.get("path", "")
-        project_type = self.current_project.get("type", "")
-        
-        # Use VersionService for version bumping
-        result = self.version_service.bump_version(path, project_type, "patch")
-        
-        if result["success"]:
-            self.log(f"✅ {result['message']}")
-            # Update cache
-            if result["new_version"]:
-                self._current_version_info = self.version_service.get_version_info(path, project_type)
-            self.update_bump_button_state()
-            self.refresh_project()
-        else:
-            self.log(f"❌ {result['message']}")
-    
+
     def build_project(self):
         """Build the project (execute build script for python_app)."""
         if not self.current_project:
