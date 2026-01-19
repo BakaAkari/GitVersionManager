@@ -210,6 +210,80 @@ class PythonAppParser(VersionParser):
         return content
 
 
+
+class UEPluginParser(VersionParser):
+    """Parser for Unreal Engine .uplugin files."""
+    
+    # "VersionName": "1.0" or "VersionName": "1.0.2"
+    VERSION_PATTERN = re.compile(r'"VersionName"\s*:\s*"([^"]+)"')
+    
+    def __init__(self, project_path: str = None):
+        self.project_path = project_path
+        self._uplugin_file = None
+
+    def get_version_file(self) -> str:
+        if self._uplugin_file:
+            return self._uplugin_file
+            
+        if self.project_path:
+            try:
+                for f in os.listdir(self.project_path):
+                    if f.endswith(".uplugin"):
+                        self._uplugin_file = f
+                        return f
+            except OSError:
+                pass
+        return "plugin.uplugin"
+    
+    def get_version(self, content: str) -> Optional[Tuple[int, int, int]]:
+        match = self.VERSION_PATTERN.search(content)
+        if match:
+            version_str = match.group(1)
+            parts = version_str.split('.')
+            try:
+                if len(parts) >= 3:
+                    return (int(parts[0]), int(parts[1]), int(parts[2]))
+                elif len(parts) == 2:
+                    return (int(parts[0]), int(parts[1]), 0)
+                elif len(parts) == 1:
+                     return (int(parts[0]), 0, 0)
+            except ValueError:
+                pass
+        return None
+    
+    def set_version(self, content: str, version: Tuple[int, int, int]) -> str:
+        version_str = f"{version[0]}.{version[1]}.{version[2]}"
+        return self.VERSION_PATTERN.sub(f'"VersionName": "{version_str}"', content)
+
+
+class UEProjectParser(VersionParser):
+    """Parser for Unreal Engine .uproject files (No version tracking)."""
+    
+    def __init__(self, project_path: str = None):
+        self.project_path = project_path
+        self._uproject_file = None
+
+    def get_version_file(self) -> str:
+        if self._uproject_file:
+            return self._uproject_file
+            
+        if self.project_path:
+            try:
+                for f in os.listdir(self.project_path):
+                    if f.endswith(".uproject"):
+                        self._uproject_file = f
+                        return f
+            except OSError:
+                pass
+        return "project.uproject"
+    
+    def get_version(self, content: str) -> Optional[Tuple[int, int, int]]:
+        return None
+    
+    def set_version(self, content: str, version: Tuple[int, int, int]) -> str:
+        return content
+
+
 def detect_project_type(project_path: str) -> Optional[str]:
     """Auto-detect project type based on files present."""
     # Check for Blender addon first
@@ -219,6 +293,20 @@ def detect_project_type(project_path: str) -> Optional[str]:
             content = f.read()
             if 'bl_info' in content:
                 return "blender_addon"
+    
+    # Check for UE Plugin
+    try:
+        if any(f.endswith(".uplugin") for f in os.listdir(project_path)):
+            return "ue_plugin"
+    except OSError:
+        pass
+
+    # Check for UE Project
+    try:
+        if any(f.endswith(".uproject") for f in os.listdir(project_path)):
+            return "ue_project"
+    except OSError:
+        pass
     
     # Check for Python App (has version.py or version.txt and main.py or similar)
     version_file_exists = (
@@ -261,9 +349,13 @@ def get_parser(project_type: str, **kwargs) -> Optional[VersionParser]:
         "blender_addon": BlenderAddonParser,
         "npm": PackageJsonParser,
         "python": PyProjectParser,
+        "ue_plugin": UEPluginParser,
+        "ue_project": UEProjectParser,
     }
     
     parser_class = parsers.get(project_type)
     if parser_class:
+        if project_type == "ue_plugin" or project_type == "ue_project":
+             return parser_class(project_path=kwargs.get("project_path"))
         return parser_class()
     return None

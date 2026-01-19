@@ -287,15 +287,6 @@ class GitHelper:
         """
         branch = self.get_current_branch() or "main"
         
-        # Fetch first
-        self.fetch(remote)
-        
-        # Get ahead/behind counts
-        result = self._run_git(
-            ["rev-list", "--left-right", "--count", f"HEAD...{remote}/{branch}"],
-            check=False
-        )
-        
         status = {
             "remote": remote,
             "branch": branch,
@@ -305,6 +296,41 @@ class GitHelper:
             "can_pull": True,
             "error": None
         }
+        
+        # Fetch first
+        try:
+            self.fetch(remote)
+        except Exception as e:
+            status["error"] = f"Fetch failed: {e}"
+            return status
+        
+        # Check if remote branch exists
+        check_ref = self._run_git(
+            ["rev-parse", "--verify", f"{remote}/{branch}"],
+            check=False
+        )
+        
+        if check_ref.returncode != 0:
+            # Try common branch names
+            for alt_branch in ["main", "master"]:
+                if alt_branch != branch:
+                    alt_check = self._run_git(
+                        ["rev-parse", "--verify", f"{remote}/{alt_branch}"],
+                        check=False
+                    )
+                    if alt_check.returncode == 0:
+                        branch = alt_branch
+                        status["branch"] = branch
+                        break
+            else:
+                status["error"] = f"远程分支不存在: {remote}/{branch}"
+                return status
+        
+        # Get ahead/behind counts
+        result = self._run_git(
+            ["rev-list", "--left-right", "--count", f"HEAD...{remote}/{branch}"],
+            check=False
+        )
         
         if result.returncode == 0:
             parts = result.stdout.strip().split()
